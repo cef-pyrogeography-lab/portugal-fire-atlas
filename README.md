@@ -1,6 +1,6 @@
 # Portuguese Monthly Fire Atlas 
 
-This repository has an example code used to build the Portuguese Monthly Fire Atlas (1984 - 2021). 
+This repository has an example [code](monthly-fire-atlas.js) used to build the Portuguese Monthly Fire Atlas (1984 - 2021). 
 
 You can find the dataset at: <https://doi.org/10.1594/PANGAEA.955012>
 
