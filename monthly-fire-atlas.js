@@ -1,9 +1,7 @@
 /**
  * This is an example code of the following paper:
  * 
- * "NEVES, A. K., CAMPAGNOLO, M. L., SILVA, J. M. N., PEREIRA, J. M. C. (submitted). 
- * A Landsat-based atlas of monthly burned area for Portugal, 1984 - 2021. 
- * International Journal of Applied Earth Observation and Geoinformation"
+ * Alana K. Neves, Manuel L. Campagnolo, João M.N. Silva, José M.C. Pereira, A Landsat-based atlas of monthly burned area for Portugal, 1984–2021, International Journal of Applied Earth Observation and Geoinformation, Volume 119, 2023, 103321, ISSN 1569-8432, https://doi.org/10.1016/j.jag.2023.103321.
  * 
  * Since the processing is performed separately for each year, 
  * the code below is only for the year 2016.
