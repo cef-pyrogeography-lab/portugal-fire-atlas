@@ -39,7 +39,7 @@ var filteredCollection_all_8 = ee.ImageCollection('LANDSAT/LC08/C02/T1_L2')
    
 var filteredCollection_all_7 = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2')
   .filter(ee.Filter.bounds(geom))
-  .filterMetadata('CLOUD_COVER', 'less_than', 40)
+  .filterMetadata('CLOUD_COVER', 'less_than', 40)  // MC: demasiado restrito?
   .filterDate(start, end).sort('system:time_start');
   
 print('Filtered collection L8  - all year: ', filteredCollection_all_8);
@@ -47,6 +47,8 @@ print('Filtered collection L7  - all year: ', filteredCollection_all_7);
 
 
 /* 
+
+MC: outra abordagem: Stripe Error Correction for Landsat-7 Using Deep Learning: https://link.springer.com/article/10.1007/s41064-024-00306-x; https://github.com/ynsemrevrl/eliminating-stripe-errors
 
 // FOCAL MEAN ERA A ABORDAGEM DA ALANA PARA PREENCHER AS FALHAS DO L7 EM TERMOS DE SLC-OFF 
 // ESTA ABORDAGEM FOI SUBSTITUIDA POR UM FILTRO KERNEL
@@ -120,7 +122,7 @@ var l7_filtered = filteredCollection_all_7.map(kernelGapFill);
     var slc_off_mask = original_image.select('QA_PIXEL').toInt().bitwiseAnd(1).eq(1);
     var valid_pixel_mask = slc_off_mask.not();
   
-    // Blend the valid pixels from the original image into the interpolated image
+    // Blend the valid pixels from the original image into the interpolated image //MC: de facto parece fazer mais sentido usar o where do que simplesmente o blend
     var final_image = image.select(['SR_B1','SR_B2','SR_B3','SR_B4','SR_B5','ST_B6', 'SR_B7','QA_RADSAT', 'QA_PIXEL'])
                            .where(valid_pixel_mask, original_image.select(['SR_B1','SR_B2','SR_B3','SR_B4','SR_B5','ST_B6', 'SR_B7', 'QA_RADSAT', 'QA_PIXEL']))
                            .set('system:time_start', image.get('system:time_start'));
@@ -230,9 +232,10 @@ var l7_filtered = filteredCollection_all_7.map(kernelGapFill);
     var saturationMask = image.select('QA_RADSAT').eq(0);
   
     // Apply the scaling factors to the appropriate bands.
+    // MC: fazer estas alterações no GEE vai converter inteiros em float e tornar o output mais pesado; uma solução é voltar a converter para inteiros 0-10000 por exemplo
     var opticalBands = image.select('Red','NIR','SWIR2').multiply(0.0000275).add(-0.2);
     var thermalBand = image.select('Thermal').multiply(0.00341802).add(149.0);
-    var mascara = thermalBand.gte(300);
+    var mascara = thermalBand.gte(300);  // MC: seria melhor ter estas constantes definidas no cabeçalho
     var scal = image.addBands(opticalBands, null, true).addBands(thermalBand, null, true);
     var unm = scal.updateMask(qaMask).updateMask(saturationMask);
     var thermalmask = scal.mask(mascara);
@@ -254,21 +257,24 @@ var l7_filtered = filteredCollection_all_7.map(kernelGapFill);
       var index = img.normalizedDifference(['NIR', 'SWIR2'])
                     .select([0], ['NBR'])
                     .set('system:time_start', img.get('system:time_start'));
-      return img.addBands(index).toFloat() ;
+      return img.addBands(index).toFloat() ; // MC: aqui também é float
   };
   
   //Apply it
   var ltCollection_all =  maskedcollection_all.map(nbr);
-  
-    print('Filtered collection with NBR: ', ltCollection_all);
-  
+
+// MC: como Alana
+print('Filtered collection with NBR: ', ltCollection_all);
+
+// MC: Novo
   // .REDUCE BY MIN NBR AQUI APENAS PARA SE TER IMAGEM PREFILTRO HAMPEL
   // PARA SER MAIS LEVE, ESTA APENAS PARA A AREA "geom"
   
   //REDUCE BY MIN NBR
   var ltCollection_all_prefiltro = ltCollection_all.select(['NBR', 'Red','NIR','SWIR2','doy']);
   print('Filtered collection with NBR (prefiltro) ', ltCollection_all_prefiltro);
-  
+
+// aplicar critério min NBR para redução
   var ltCollection_all_prefiltro_min_NBRdiff = ltCollection_all_prefiltro.reduce(ee.Reducer.min(ltCollection_all_prefiltro.first().bandNames().size()))
     .rename(['NBR', 'Red','NIR','SWIR2','doy']);
   
