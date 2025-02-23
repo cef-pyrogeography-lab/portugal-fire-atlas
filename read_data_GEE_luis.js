@@ -72,7 +72,7 @@ var l7_filtered = filteredCollection_all_7.map(filtered_focal_mean);
 */
 
 
-///////////////////////  Kernel Gap Filling for Entire Collection ///////////////////////
+///////////////////////  Kernel Gap Filling for Entire Collection : SLC-OFF  ///////////////////////
 
 // Function to apply kernel gap filling to each image
 function kernelGapFill(image) {
@@ -137,7 +137,7 @@ var l7_filtered = filteredCollection_all_7.map(kernelGapFill);
   // Visualization of the first image after applying SLC-off mask and blending
   Map.addLayer(l7_filtered_kernel.first(), {bands: ['SR_B7', 'SR_B4', 'SR_B3']}, 'colecaoL7_NBR_kernelFilledCollection');
   
-///////////////////////  DOY ///////////////////////
+/////////////////////// ADD DOY BAND AND RENAME L7 AND L8 BANDS ///////////////////////
   
   //CREATE DATE BAND (DOY) FOR EACH IMAGE IN COLLECTION
   
@@ -182,6 +182,7 @@ var l7_filtered = filteredCollection_all_7.map(kernelGapFill);
   
   
 ///////////////////////  MERGE L7 AND L8  ///////////////////////
+// output: col_mosaic 
   
   var filteredCollection_all = l8_renamed.merge(l7_renamed).sort('system:time_start');
 
@@ -195,7 +196,7 @@ var l7_filtered = filteredCollection_all_7.map(kernelGapFill);
     var imlist = imcol.toList(imcol.size());
   
     var unique_dates = imlist.map(function(im){
-      return ee.Image(im).date().format("YYYY-MM-dd");
+      return ee.Image(im).date().format("YYYY-MM-dd"); // date: Returns the acquisition time of an image as a Date object. This helper function is equivalent to ee.Date(image.get('system:time_start')).
     }).distinct();
   
     var mosaic_imlist = unique_dates.map(function(d){
@@ -218,8 +219,8 @@ var l7_filtered = filteredCollection_all_7.map(kernelGapFill);
   print('Mosaics of the same date', col_mosaic);
   
   
-///////////////////////  MASCARA DE QUALIDADE  ///////////////////////
-
+///////////////////////  MASCARA DE QUALIDADE baseada em QA_PIXEL e QA_RADSAT, e thermalBand > 300 ///////////////////////
+// output: maskedcollection_all
   
   //CLOUD MASK EXCLUDING PIXELS WITH ST_B6 > 300
   function maskL78sr(image) {
@@ -249,7 +250,9 @@ var l7_filtered = filteredCollection_all_7.map(kernelGapFill);
   //var maskedcollection_all_fordiff = allcoll_fordiff.map(maskL78sr).sort('system:time_start');
   
   
-  ///////////////////////  NBR  ///////////////////////
+  ///////////////////////  ADD NBR BAND (NO TEMPORAL DIFFERENCES) ///////////////////////
+// output: ltCollection_all
+// output: ltCollection_all_prefiltro // image collection com bandas ['NBR', 'Red','NIR','SWIR2','doy']
 
   // CREATE NBR FUNCTION 
   var nbr = function(img) {
@@ -261,18 +264,20 @@ var l7_filtered = filteredCollection_all_7.map(kernelGapFill);
   };
   
   //Apply it
-  var ltCollection_all =  maskedcollection_all.map(nbr);
+  var ltCollection_all =  maskedcollection_all.map(nbr); // só tem 5 bandas: nbr, red, nir, swir2 e doy
 
-// MC: como Alana
 print('Filtered collection with NBR: ', ltCollection_all);
 
 // MC: Novo
   // .REDUCE BY MIN NBR AQUI APENAS PARA SE TER IMAGEM PREFILTRO HAMPEL
   // PARA SER MAIS LEVE, ESTA APENAS PARA A AREA "geom"
   
-  //REDUCE BY MIN NBR
   var ltCollection_all_prefiltro = ltCollection_all.select(['NBR', 'Red','NIR','SWIR2','doy']);
   print('Filtered collection with NBR (prefiltro) ', ltCollection_all_prefiltro);
+
+/////////////////////// REDUCE COLLECTION TO IMAGE WITH MIN(NBR) ///////////////////////
+// OUTPUT: ltCollection_all_prefiltro_min_NBRdiff_GEOM 
+// MC: NBRdiff é enganador
 
 // aplicar critério min NBR para redução
   var ltCollection_all_prefiltro_min_NBRdiff = ltCollection_all_prefiltro.reduce(ee.Reducer.min(ltCollection_all_prefiltro.first().bandNames().size()))
@@ -286,25 +291,33 @@ print('Filtered collection with NBR: ', ltCollection_all);
   
   Map.addLayer(ltCollection_all_prefiltro_min_NBRdiff_GEOM, {bands: ['NBR']}, 'min NBR prefiltro',false);
   
-  
+////////////////////////////////////////////////////////////////  
 /////////////////////// FILTRO DE HAMPEL ///////////////////////
+////////////////////////////////////////////////////////////////
+// outputs: IC NBRdiff; IC NBRmedian; IC diff_nbr_median ; IC allcol_rep 
+// É mesmo NBRdiff que se quer?
+
+/////////////////////// A. CALCULA NBRdiff COMO ALANA ///////////////////////
+// input: ltCollection_all (image collection) com banda NBR
+// OUTPUT: NBRdiff: image collection, bandas ['Red','NIR','SWIR2','doy','NBR','Redb','NIRb','SWIR2b','doyb','NBRb','NBRdiff']
 
   //Select only the bands of interest 
-  var select_bands = ltCollection_all.select(['Red','NIR','SWIR2','doy','NBR']);
+  var select_bands = ltCollection_all.select(['Red','NIR','SWIR2','doy','NBR']); // MC: são as unicas bandas desta IC
   
   //Organize by ascendent date 
   var select_bands = select_bands.sort('system:time_start');
-  
+
+// a 1a banda de NBRdiff chamada 'NBRdiff' vai ser de facto a diferença dos NBR
   var NBRdiff = select_bands.map(function(img){
     var length = select_bands.size();
     var list = select_bands.toList(length);
     var index = list.indexOf(img);
-    var previousIndex = ee.Algorithms.If(index.eq(0), index, index.subtract(1));
+    var previousIndex = ee.Algorithms.If(index.eq(0), index, index.subtract(1));     
     var previousImage = ee.Image(list.get(previousIndex));
     var currentDate = ee.Date(previousImage.get('system:time_start'));
     var diffimg = select_bands.filterDate(
-                  start, currentDate.advance(2, 'hour'));
-    var reduce_image = diffimg.reduce(ee.Reducer.lastNonNull())
+                  start, currentDate.advance(2, 'hour')); //IC
+    var reduce_image = diffimg.reduce(ee.Reducer.lastNonNull()) // image
     .rename(['Redb','NIRb','SWIR2b','doyb','NBRb']);
     // replace all masked values:
     var new_diff = img.select(['NBR']).subtract(reduce_image.select(['NBRb'])).rename(['NBRdiff']);
@@ -313,10 +326,15 @@ print('Filtered collection with NBR: ', ltCollection_all);
   });
   
   print('NBR diff - all bands',NBRdiff);
-  
+
+///////////////////// CALCULA NBRmedian COMO ALANA //////////////////////////
+// OUTPUT: IC NBRmedian
+
   //select only NBR bands
-  var nbrbands = NBRdiff.select(['NBR']);
-  
+// a banda 'NBR' está em  ltCollection_all: porque é necessário calcular a IC NBRdiff
+  var nbrbands = NBRdiff.select(['NBR']);  // MC: não a dif de NBR , pois é a banda 'NBR' de NBRdiff, não e banda 'NBRdiff'
+
+// MC: calcula a mediana de 3 sucessivas imagens?
   var NBRmedian = nbrbands.map(function(img){
     var length = nbrbands.size();
     var list = nbrbands.toList(length);
@@ -326,17 +344,18 @@ print('Filtered collection with NBR: ', ltCollection_all);
     var previousImage = ee.Image(list.get(previousIndex));
     var currentDate = ee.Date(previousImage.get('system:time_start'));
     var diffimg = nbrbands.filterDate(
-                  start, currentDate.advance(2, 'hour'));
-    var reduce_image = diffimg.mosaic();
+                  start, currentDate.advance(2, 'hour'));  // nbrbands é uma IC, por isso diffimg é também IC
+    var reduce_image = diffimg.mosaic(); // o output de masaic é uma imagem
     //after image
         //  NESTE SEQ. DE CODIGO DA ALANA É NECESSARIO AJUSTAR O NUMERO DE index.eq(X) CONSOANTE O
         //   NUMERO DE IMAGENS EXISTENTES NA COLECAO 
-    var nextIndex = ee.Algorithms.If(index.eq(66), index, index.add(1)); 
+    // MC: para resolver isso, fazer   var nextIndex = ee.Algorithms.If(index.lt(length), index, index.add(1)); //
+    var nextIndex = ee.Algorithms.If(index.eq(66), index, index.add(1)); // MC: colocar length em vez de 66
     var nextImage = ee.Image(list.get(nextIndex));
     var nextDate = ee.Date(nextImage.get('system:time_start'));
-    var nextimg = nbrbands.filterDate(nextDate.advance(-2, 'hour'), end);
+    var nextimg = nbrbands.filterDate(nextDate.advance(-2, 'hour'), end); //IC
     var nextimgrev = nextimg.sort('system:time_start', false);
-    var reducenxt_image = nextimgrev.mosaic();
+    var reducenxt_image = nextimgrev.mosaic(); // devolve imagem
     // replace all masked values:
     var allthree = ee.ImageCollection([reduce_image, img, reducenxt_image]);
     var medianImage = allthree.reduce(ee.Reducer.median());
@@ -344,7 +363,10 @@ print('Filtered collection with NBR: ', ltCollection_all);
   });
   
   //print('NBRmedian',NBRmedian);
-  
+
+///////////////////// CALCULA NBR-NBRmedian COMO ALANA //////////////////////////
+// output: IC diff_nbr_median
+
   //compute the difference between NBR and NBRmedian
   var diff_nbr_median = nbrbands.map(function(img){
     var length = nbrbands.size();
@@ -356,7 +378,10 @@ print('Filtered collection with NBR: ', ltCollection_all);
   });
   
   //print('diff_nbr_median',diff_nbr_median);
-  
+
+
+///////////////////// CALCULA NBR-NBRmedian COMO ALANA //////////////////////////
+// output: imagens perc_25, etc (uma por ano)
   var perc_25 = diff_nbr_median.reduce(ee.Reducer.percentile([25]));
   var perc_75 = diff_nbr_median.reduce(ee.Reducer.percentile([75]));
   var iqr = perc_75.subtract(perc_25);
@@ -366,7 +391,11 @@ print('Filtered collection with NBR: ', ltCollection_all);
   
   //print('iqr',iqr);
   //Map.addLayer(iqr, null, 'iqr',false);
-  
+
+///////////////////// substitui outliers em nbrbands por NBRmedium COMO ALANA //////////////////////////
+// nota: nbrbands = NBRdiff.select(['NBR']), mas é o NBR, não a diferença
+// output: replaced: IC com uma única banda
+
   var replace_iqr = function(img) {
     var length = nbrbands.size().add(10);
     var list = nbrbands.toList(length);
@@ -379,19 +408,20 @@ print('Filtered collection with NBR: ', ltCollection_all);
     var img_rep = ee.Image(list_rep.get(index));
     var img_final = img.where(img.gt(limiar_sup), img_rep);
     var img_final = img_final.where(img.lt(limiar_inf), img_rep);
-    return img_final.rename(['NBRrep']);
+    return img_final.rename(['NBRrep']);  
   };
   
-  var replaced = nbrbands.map(replace_iqr);
+  var replaced = nbrbands.map(replace_iqr); // NBRrep são os valores de nbrbands, e por isso de NBR, e não de diferença de NBR
   print('replaced',replaced);
   
-  var allcoll_rep = NBRdiff.combine(NBRmedian);
+  var allcoll_rep = NBRdiff.combine(NBRmedian); // combines Makes a new collection that is a copy of the images in primary, adding all the bands from the image in secondary with a matching ID.
   var allcoll_rep = allcoll_rep.combine(diff_nbr_median);
   var allcoll_rep = allcoll_rep.combine(replaced).sort('system:time_start');
   print('replaced',allcoll_rep);
   
-
-
+///////////////////// FINALMENTE, FAZ REDUCE PARA OBTER OUTPUT PARA EXPORTAR //////////////////////////
+// o reducer é o mínimo de NBRrep, que são os valores de NBR corrigidos para os outliers
+// parece que não usa a banda 'NBRdiff'
 //REDUCE BY MIN NBR
 var allcoll_diff_select = allcoll_rep.select(['NBRrep','Red','NIR','SWIR2','doy','Redb','NIRb','SWIR2b','doyb']);
 
@@ -409,8 +439,7 @@ Map.addLayer(min_NBRdiff_pt, {bands: ['NBRrep']}, 'min NBR',false);
 
 
 ///////////////////////// R-NBR /////////// 
-/// Utiliza-se a coleção antes do Min NBR [ltCollection_all]
-
+/// Utiliza-se a coleção antes do Min NBR [ltCollection_all] que tem bandas ['NBR','Red','NIR','SWIR2','doy']
 
 // Function to compute NBR change ratio (NBR_t1 - NBR_t2) / (NBR_t2 + 1.001)
 function computeNBRChange(previous, current) {
@@ -473,7 +502,7 @@ var rNBR_Diff = currentComposite.select('rNBR').subtract(previousComposite.selec
 // Apply Haralick homogeneity based on DOY_Current
 var doyCurrent = currentComposite.select('DOY_Current').toUint16(); // Convert to integer
 
-var doyCurrentTexture = doyCurrent.glcmTexture({size: 3}).select('DOY_Current_idm');
+var doyCurrentTexture = doyCurrent.glcmTexture({size: 3}).select('DOY_Current_idm'); 
   // das várias bandas criadas a de interesse é : IDM: f5, Inverse Difference Moment; measures the homogeneity
 
 // Add layers to the map
