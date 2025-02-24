@@ -275,7 +275,7 @@ print('Filtered collection with NBR: ', ltCollection_all);
   var ltCollection_all_prefiltro = ltCollection_all.select(['NBR', 'Red','NIR','SWIR2','doy']);
   print('Filtered collection with NBR (prefiltro) ', ltCollection_all_prefiltro);
 
-/////////////////////// REDUCE COLLECTION TO IMAGE WITH MIN(NBR) ///////////////////////
+/////////////////////// REDUCE COLLECTION TO IMAGE WITH MIN(NBR) /////////////////////// ltCollection_all_prefiltro_min_NBRdiff: Não é usado fora deste bloco
 // OUTPUT: ltCollection_all_prefiltro_min_NBRdiff_GEOM 
 // MC: NBRdiff é enganador
 
@@ -289,7 +289,7 @@ print('Filtered collection with NBR: ', ltCollection_all);
   
   Map.addLayer(ltCollection_all_prefiltro_min_NBRdiff_GEOM, {bands: ['SWIR2', 'NIR', 'Red']}, 'min NBR_RGB_PREFILTRO',false);
   
-  Map.addLayer(ltCollection_all_prefiltro_min_NBRdiff_GEOM, {bands: ['NBR']}, 'min NBR prefiltro',false);
+  Map.addLayer(_GEOM, {bands: ['NBR']}, 'min NBR prefiltro',false);
   
 ////////////////////////////////////////////////////////////////  
 /////////////////////// FILTRO DE HAMPEL ///////////////////////
