@@ -142,7 +142,7 @@ var l7_filtered = filteredCollection_all_7.map(kernelGapFill);
   //CREATE DATE BAND (DOY) FOR EACH IMAGE IN COLLECTION
   
   var addDate = function(image){
-    var doy = image.date().getRelative('day', 'year');
+    var doy = image.date().getRelative('day', 'year'); // para obter o ano usar get(unit, timeZone)
     var doyBand = ee.Image.constant(doy).uint16().add(1).rename('doy');
     doyBand = doyBand.updateMask(image.select('SR_B4').mask());
     
@@ -297,7 +297,7 @@ print('Filtered collection with NBR: ', ltCollection_all);
 // outputs: IC NBRdiff; IC NBRmedian; IC diff_nbr_median ; IC allcol_rep 
 // É mesmo NBRdiff que se quer?
 
-/////////////////////// A. CALCULA NBRdiff COMO ALANA ///////////////////////
+/////////////////////// A. CALCULA NBRdiff COMO ALANA /////////////////////// 'NBRdiff' não é usado para a frente
 // input: ltCollection_all (image collection) com banda NBR
 // OUTPUT: NBRdiff: image collection, bandas ['Red','NIR','SWIR2','doy','NBR','Redb','NIRb','SWIR2b','doyb','NBRb','NBRdiff']
 
@@ -320,7 +320,7 @@ print('Filtered collection with NBR: ', ltCollection_all);
     var reduce_image = diffimg.reduce(ee.Reducer.lastNonNull()) // image
     .rename(['Redb','NIRb','SWIR2b','doyb','NBRb']);
     // replace all masked values:
-    var new_diff = img.select(['NBR']).subtract(reduce_image.select(['NBRb'])).rename(['NBRdiff']);
+    var new_diff = img.select(['NBR']).subtract(reduce_image.select(['NBRb'])).rename(['NBRdiff']); // cálculo da fórmula a partir de NBR presente e passado
     var result = img.addBands(reduce_image).rename(['Red','NIR','SWIR2','doy','NBR','Redb','NIRb','SWIR2b','doyb','NBRb']);
     return result.addBands(new_diff).rename(['Red','NIR','SWIR2','doy','NBR','Redb','NIRb','SWIR2b','doyb','NBRb','NBRdiff']);
   });
@@ -380,7 +380,7 @@ print('Filtered collection with NBR: ', ltCollection_all);
   //print('diff_nbr_median',diff_nbr_median);
 
 
-///////////////////// CALCULA NBR-NBRmedian COMO ALANA //////////////////////////
+///////////////////// CALCULA NBR-NBRmedian (continuação) COMO ALANA //////////////////////////
 // output: imagens perc_25, etc (uma por ano)
   var perc_25 = diff_nbr_median.reduce(ee.Reducer.percentile([25]));
   var perc_75 = diff_nbr_median.reduce(ee.Reducer.percentile([75]));
@@ -418,7 +418,10 @@ print('Filtered collection with NBR: ', ltCollection_all);
   var allcoll_rep = allcoll_rep.combine(diff_nbr_median);
   var allcoll_rep = allcoll_rep.combine(replaced).sort('system:time_start');
   print('replaced',allcoll_rep);
-  
+
+/////////////////////////  CALCULAR o ÍNDICE R_NBR que depois é usado para o REDUCER 
+// usar u código da Alana linha ~320
+
 ///////////////////// FINALMENTE, FAZ REDUCE PARA OBTER OUTPUT PARA EXPORTAR //////////////////////////
 // o reducer é o mínimo de NBRrep, que são os valores de NBR corrigidos para os outliers
 // parece que não usa a banda 'NBRdiff'
