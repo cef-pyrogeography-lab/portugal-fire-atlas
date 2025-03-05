@@ -35,12 +35,16 @@ var end = ee.Date.fromYMD(currentyear, 12, 31);
 var filteredCollection_all_8 = ee.ImageCollection('LANDSAT/LC08/C02/T1_L2')
   .filter(ee.Filter.bounds(geom))
   .filterMetadata('CLOUD_COVER', 'less_than', 40)
-  .filterDate(start, end).sort('system:time_start');
+  .filterDate(start, end).sort('system:time_start')
+  // TEMPORARIO - APENAS PARA SELECIONAR PEQUENA SECCAO DAS IMAGENS PARA ACELERAR O VISUALIZADOR
+  .map(function(image) { return image.clip(geom); }); 
    
 var filteredCollection_all_7 = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2')
   .filter(ee.Filter.bounds(geom))
   .filterMetadata('CLOUD_COVER', 'less_than', 40)  
-  .filterDate(start, end).sort('system:time_start');
+  .filterDate(start, end).sort('system:time_start')
+   // TEMPORARIO - APENAS PARA SELECIONAR PEQUENA SECCAO DAS IMAGENS PARA ACELERAR O VISUALIZADOR
+  .map(function(image) { return image.clip(geom); }); 
   
 //print('Filtered collection L8  - all year: ', filteredCollection_all_8);
 //print('Filtered collection L7  - all year: ', filteredCollection_all_7);
@@ -283,7 +287,7 @@ print('Filtered collection with NBR: ', ltCollection_all);
                   start, currentDate.advance(2, 'hour'));  // nbrbands é uma IC, por isso diffimg é também IC
     var reduce_image = diffimg.mosaic(); // o output de masaic é uma imagem
     //after image
-    var nextIndex = ee.Algorithms.If(index.lt(length), index, index.add(1)); // MC: colocar length em vez de 66 / feito LL
+    var nextIndex = ee.Algorithms.If(index.lt(length.subtract(1)), index.add(1), index); 
     var nextImage = ee.Image(list.get(nextIndex));
     var nextDate = ee.Date(nextImage.get('system:time_start'));
     var nextimg = nbrbands.filterDate(nextDate.advance(-2, 'hour'), end); //IC
@@ -292,7 +296,10 @@ print('Filtered collection with NBR: ', ltCollection_all);
     // replace all masked values:
     var allthree = ee.ImageCollection([reduce_image, img, reducenxt_image]);
     var medianImage = allthree.reduce(ee.Reducer.median());
-    return medianImage.updateMask(img.mask()).rename(['NBRmedian']);
+    medianImage = medianImage.updateMask(img.mask()).rename(['NBRmedian']);
+
+  // Copia as propriedades originais (para preservar system:index e system:time_start)
+  return medianImage.copyProperties(img, ['system:index', 'system:time_start']);
   });
   
   //print('NBRmedian',NBRmedian);
@@ -306,8 +313,9 @@ print('Filtered collection with NBR: ', ltCollection_all);
     var list = nbrbands.toList(length);
     var index = list.indexOf(img);
     var list_m = NBRmedian.toList(length);
-    var Image_m = ee.Image(list_m.get(index));
-    return img.subtract(Image_m).rename(['NBRmedian_diff']);
+    var image_m = ee.Image(list_m.get(index));
+    var diffImage = img.subtract(image_m).rename(['NBRmedian_diff']);
+  return diffImage.copyProperties(img, ['system:index', 'system:time_start']);
   });
   
   //print('diff_nbr_median',diff_nbr_median);
@@ -318,8 +326,7 @@ print('Filtered collection with NBR: ', ltCollection_all);
 	
   var perc_25 = diff_nbr_median.reduce(ee.Reducer.percentile([25]));
   var perc_75 = diff_nbr_median.reduce(ee.Reducer.percentile([75]));
-  var iqr = perc_75.subtract(perc_25);
-  var iqr = iqr.multiply(1.5);
+  var iqr = perc_75.subtract(perc_25).multiply(1.5);
   var limiar_inf = perc_25.subtract(iqr);
   var limiar_sup = perc_75.add(iqr);
   
@@ -336,64 +343,98 @@ print('Filtered collection with NBR: ', ltCollection_all);
     var index = list.indexOf(img);
     
      // Garantir que o índice seja válido
-    var validIndex = ee.Number(index).min(length.add(2)).max(0); // Índice entre 0 e (length - 1)
+    var validIndex = ee.Number(index).min(length.subtract(1)).max(0); // Índice entre 0 e (length - 1)
     var list_rep = NBRmedian.toList(length);
+    var img_rep = ee.Image(list_rep.get(validIndex));
     
-    var img_rep = ee.Image(list_rep.get(index));
-    var img_final = img.where(img.gt(limiar_sup), img_rep);
-    var img_final = img_final.where(img.lt(limiar_inf), img_rep);
-    return img_final.rename(['NBRrep']);  
+	// Substituição dos valores que excedem os limites
+	var img_final = img.where(img.gt(limiar_sup), img_rep.unmask(img)).unmask(img);
+	img_final = img_final.where(img.lt(limiar_inf), img_rep.unmask(img)).unmask(img);
+	img_final = img_final.rename(['NBRrep']);
+
+  return img_final.copyProperties(img, ['system:index', 'system:time_start']);  
   };
+  
   
   var replaced = nbrbands.map(replace_iqr); // NBRrep são os valores de nbrbands, e por isso de NBR, e não de diferença de NBR
   print('replaced',replaced);
   
-  var ltCollection_all_hampel = ltCollection_all.combine(NBRmedian); // combines Makes a new collection that is a copy of the images in primary, adding all the bands from the image in secondary with a matching ID.
-  var ltCollection_all_hampel = ltCollection_all_hampel.combine(diff_nbr_median);
-  var ltCollection_all_hampel = ltCollection_all_hampel.combine(replaced).sort('system:time_start');
-  print('replaced  allcoll_rep',ltCollection_all_hampel);
+  // Combina as bandas processadas com a coleção original
+// Nesta abordagem, para cada imagem original é adicionado o NBRmedian, NBRmedian_diff e NBRrep
+var ltCollection_all_hampel = ltCollection_all.map(function(img) {
+  var id = img.get('system:index');  // Preserva o ID original
+
+  // Busca as imagens correspondentes nas coleções processadas com base em system:index
+  var medianImg = ee.Image(NBRmedian.filter(ee.Filter.eq('system:index', id)).first());
+  var diffImg = ee.Image(diff_nbr_median.filter(ee.Filter.eq('system:index', id)).first());
+  var repImg = ee.Image(replaced.filter(ee.Filter.eq('system:index', id)).first());
+
+  // Caso alguma imagem não seja encontrada, substitui por uma imagem constante (0)
+  medianImg = ee.Algorithms.If(medianImg, medianImg, ee.Image.constant(0).rename('NBRmedian'));
+  diffImg = ee.Algorithms.If(diffImg, diffImg, ee.Image.constant(0).rename('NBRmedian_diff'));
+  repImg = ee.Algorithms.If(repImg, repImg, ee.Image.constant(0).rename('NBRrep'));
+
+  return img.addBands(ee.Image(medianImg))
+            .addBands(ee.Image(diffImg))
+            .addBands(ee.Image(repImg));
+}).sort('system:time_start');
+
+print('Fixed Hampel Collection:', ltCollection_all_hampel);
   
 
 	///////////  R_NBR ////////////
 
 	//CALCULAR o ÍNDICE R_NBR que depois é usado para o REDUCER  
-	// usar u código da Alana linha ~320 // feito LL
-
-    // LL !! Considerando que adicionamos uma banda NBRrep (que são os valores de NBR corrigidos para os outliers) não deviamos usar essa banda para calcular o indice rNBR ?? 	// e para tal deviamos usar allcoll_rep ao inves de ltCollection_all mas dá erro. Necessario averiguar
-
-
-// Tentar descortinar o erro entre allcoll_rep ao inves de ltCollection_all
-print('NBR diff - ltCollection_all_hampel',ltCollection_all_hampel);
-print('NBR diff - ltCollection_all bands',ltCollection_all); 
-Map.addLayer(ltCollection_all_hampel, {bands: ['SWIR2', 'NIR', 'Red']}, 'ltCollection_all_hampel ' + currentyear,false);
-Map.addLayer(ltCollection_all, {bands: ['SWIR2', 'NIR', 'Red']}, 'ltCollection_all ' + currentyear,false);
+	
 
 
  //Select only the bands of interest  
-  var select_bands = ltCollection_all.select(['Red','NIR','SWIR2','doy','year','NBR']); // MC: são as unicas bandas desta IC // 
+  var select_bands_hampel = ltCollection_all_hampel.select(['Red', 'NIR', 'SWIR2', 'doy', 'year', 'NBRrep']) // Colocado NBRrep ao inves de NBR
    
   //Organize by ascendent date 
-  var select_bands = select_bands.sort('system:time_start');
+  var sorted = select_bands_hampel.sort('system:time_start');
   
+  // Convert to list
+  var list = sorted.toList(sorted.size());
 
-	// Adiciona as bandas do "before"
-		// LL _ banda NBRdiff passa a ser NBRChange para evitar confusões
-  var NBRdiff = select_bands.map(function(img){
-    var length = select_bands.size();
-    var list = select_bands.toList(length);
-    var index = list.indexOf(img);
-    var previousIndex = ee.Algorithms.If(index.eq(0), index, index.subtract(1));     
-    var previousImage = ee.Image(list.get(previousIndex));
-    var currentDate = ee.Date(previousImage.get('system:time_start'));
-    var diffimg = select_bands.filterDate(start, currentDate.advance(2, 'hour')); //IC
-    var reduce_image = diffimg.select(['Red', 'NIR', 'SWIR2', 'doy','year', 'NBR'])
-                              .reduce(ee.Reducer.lastNonNull())
-                              .rename(['Redb','NIRb','SWIR2b','doyb','yearb','NBRb']);
-    // replace all masked values:
-    var result = img.addBands(reduce_image);
-	return result.rename(['Red','NIR','SWIR2','doy','year','NBR','Redb','NIRb','SWIR2b','doyb','yearb','NBRb']);
-});
-  print('all bands w/ before and after fire',NBRdiff);
+	// nova coleção iterando por índices
+var withBefore = ee.ImageCollection(
+  ee.List.sequence(0, list.size().subtract(1)).map(function(i) {
+    i = ee.Number(i);
+    
+    // Imagem atual (forçada a float)
+    var current = ee.Image(list.get(i)).toFloat();
+
+    // Índice da imagem anterior
+    var prevIndex = i.subtract(1);
+    
+    // Se existe anterior, usa-a e converte a float; caso contrário, dummy zeros float
+    var prevImage = ee.Image(
+      ee.Algorithms.If(
+        prevIndex.gte(0),
+        ee.Image(list.get(prevIndex))
+          .select(['Red','NIR','SWIR2','doy','year','NBRrep'])
+          .rename(['Redb','NIRb','SWIR2b','doyb','yearb','NBRrep_b'])
+          .toFloat(),
+        ee.Image.constant([0, 0, 0, 0, 0, 0])
+          .rename(['Redb','NIRb','SWIR2b','doyb','yearb','NBRrep_b'])
+          .toFloat()
+      )
+    );
+
+    // Combina a atual com a anterior
+    var combined = current.addBands(prevImage);
+
+    // Copia as propriedades originais da imagem atual (por ex. time_start, index)
+    // para manter metadados (opcional, mas recomendável)
+    return combined.copyProperties(current, current.propertyNames());
+  })
+);
+
+// Visualiza
+//Map.addLayer(withBefore, {bands: ['SWIR2b','NIRb','Redb']}, 'NBRdiff_hampel');
+print('NBRdiff_hampel', withBefore);
+
 
 
 		// ---  Function to compute NBR change ratio  ------
@@ -405,16 +446,16 @@ var addNBRChange = function(image) {
 	  // Ensure NBR comes only from the current year
     var currentNBR = image.updateMask(image.select('year').eq(currentyear));
       // Compute dNBR as the difference between the two NBR values
-	var dNBR = image.select('NBRb').subtract(image.select('NBR'));
+	var dNBR = image.select('NBRrep_b').subtract(image.select('NBRrep'));
     // Compute the ratio: (dNBR) / (NBR + 1.001) - The small constant (1.001) helps avoid division by zero
-  var NBRChange = dNBR.divide(image.select('NBR').add(1.001))
+  var NBRChange = dNBR.divide(image.select('NBRrep').add(1.001))
                         .rename('NBRChange');
     // Add the new band to the image
   return image.addBands(NBRChange);
 };
 
 // Map the function over the NBRdiff collection to get the final result
-var NBRdiff_NBRchange = NBRdiff.map(addNBRChange);
+var NBRdiff_NBRchange = withBefore.map(addNBRChange);
 
 
 ///////////////////// REDUCER PARA OBTER COMPOSITO ANUAL //////////////////////////
@@ -434,12 +475,12 @@ print('MAX_NBRCHANGE composite:', MAX_NBRCHANGE);
 // SHOULD EXIST SOME BUT NOT MANY
 
 // Create a binary mask where year == targetYear
-var yearMask = MAX_NBRCHANGE.clip(geom)
+var yearMaskcurrent = MAX_NBRCHANGE.clip(geom)
                             .select('year')
-                            .eq(currentyear - 1);
+                            .eq(currentyear); // add -1 para o previous year
 
 // Count non-masked pixels using reduceRegion
-var pixelCount = yearMask.reduceRegion({
+var pixelCountcurrent = yearMaskcurrent.reduceRegion({
     reducer: ee.Reducer.sum(),
     geometry: geom,  // Use the defined region of interest
     scale: 30,       // Landsat resolution
@@ -447,10 +488,27 @@ var pixelCount = yearMask.reduceRegion({
 });
 
 // Print the total number of pixels for the selected year
-print('Total number of pixels for year', currentyear - 1, pixelCount.get('year'));
-//Total number of pixels for year 2019 [GEOM area] - 12049.835294117634
-//Total number of pixels for year 2020 [GEOM area] - 378423.8666666629
-// Corresponde a cerca de 3%
+print('Total number of pixels for year', currentyear, pixelCountcurrent.get('year'));
+
+
+// previous year
+// Create a binary mask where year =! targetYear
+var yearMaskprevious = MAX_NBRCHANGE.clip(geom)
+                            .select('year')
+                            .eq(currentyear-1); // add -1 para o previous year
+
+// Count non-masked pixels using reduceRegion
+var pixelCountprevious = yearMaskprevious.reduceRegion({
+    reducer: ee.Reducer.sum(),
+    geometry: geom,  // Use the defined region of interest
+    scale: 30,       // Landsat resolution
+    maxPixels: 1e13
+});
+print('Total number of pixels for previous year', currentyear - 1, pixelCountprevious.get('year'));
+
+//SEMHAMPEL - Total number of pixels for year 2019 [GEOM area] - 12049.835294117634
+//SEMHAMPEL - Total number of pixels for year 2020 [GEOM area] - 378423.8666666629
+//SEMHAMPEL - Corresponde a cerca de 3%
 
 
 ///////////////////// HOMOGENEITY //////////////////////////
@@ -472,9 +530,9 @@ print('Annual Composite ' + currentyear ,AnualComposite);
 
 // Clip para visualizar pequena area
 var AnualComposite_geom = AnualComposite.clip(geom);
-Map.addLayer(AnualComposite_geom, {bands: ['NBRChange']}, 'Annual Composite ' + currentyear + 'NBRChange',false);
-Map.addLayer(AnualComposite_geom, {bands: ['SWIR2', 'NIR', 'Red']}, 'Annual Composite ' + currentyear + 'RGB',false);
-Map.addLayer(AnualComposite_geom, {bands: ['doy_homogeneity']}, 'Annual Composite ' + currentyear + 'DOY Homogeneity',false);
+Map.addLayer(AnualComposite_geom, {bands: ['NBRChange']}, 'Annual Composite ' + currentyear + 'NBRChange');
+Map.addLayer(AnualComposite_geom, {bands: ['SWIR2', 'NIR', 'Red']}, 'Annual Composite ' + currentyear + 'RGB');
+Map.addLayer(AnualComposite_geom, {bands: ['doy_homogeneity']}, 'Annual Composite ' + currentyear + 'DOY Homogeneity');
 
 
 //////      EXPORT      //////
