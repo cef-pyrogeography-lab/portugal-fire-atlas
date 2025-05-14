@@ -1,10 +1,55 @@
-/////   INITIAL INPUT ////
+// -------- FIREATLAS -------- //
 
-// YEAR TO BE PROCESSED
-var currentyear = 2020;
+// Variaveis a definir: 
+// RegionName; currentyear; Satelites (sat1; sat1Name; sat2; sat2Name)
 
-//Satellites to be used: Landsat-7 and Landsat-8
-// Confirmar se necessárias alteracoes nas coleção e nos nomes/bandas em "Rename bands"
+// Outputs:
+  // - Tabela com num. de imagens por sensor/satelite
+  // - Compósito anual, para metade de PT, com 8 bandas
+
+
+// ===  REGIÃO a ser processada === 
+var regionName = 'Norte';    // definir como 'Norte' ou 'Sul'
+
+// ===  Ano a ser processado === 
+var currentyear = 2012;
+
+    // 1984–1993	Landsat 4, Landsat 5
+    // 1994–1998	Landsat 5
+    // 1999–2002	Landsat 5, Landsat 7
+    // 2003–2012	Landsat 5, Landsat 7 (SLC-off desde 2003) *
+    // 2013–2021	Landsat 7, Landsat 8
+    // 2022–2024	Landsat 8, Landsat 9
+    
+      // * No caso de 2003–2011, dada a situação do SLC-off, o L7 deve ser 
+      // considerado Sat1 e L7 como Sat2, prioritizando imagens do L5
+      
+      
+    // PRE‐DEFINE todas as coleções possiveis:
+    var Landsat4  = ee.ImageCollection('LANDSAT/LT04/C02/T1_L2');
+    var Landsat5  = ee.ImageCollection('LANDSAT/LT05/C02/T1_L2');
+    var Landsat7  = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2');
+    var Landsat8  = ee.ImageCollection('LANDSAT/LC08/C02/T1_L2');
+    var Landsat9  = ee.ImageCollection('LANDSAT/LC09/C02/T1_L2');
+
+
+// === SATÉLITES a serem usados ===
+var sat1 = Landsat8; // ex: Landsat-8 
+var sat1Name = 'LANDSAT_8';  // Nome a ser exportado na coleção c/ o nº de imagens
+
+var sat2 = Landsat9;  
+var sat2Name = 'LANDSAT_9';
+
+
+
+
+// ===  BANDAS a exportar === 
+// Todas as bandas geradas menos Red, NIR, SWIR2 relativas ao pré-fogo
+//var bandstoexport = ['Red', 'NIR', 'SWIR2', 'NBRrep', 'NBRrep_b', 'NBRChange', 'doy', 'year', 'doyb', 'yearb', 'doy_homogeneity'];
+
+var bandstoexport = ['Red', 'NIR', 'SWIR2', 'NBRrep', 'NBRChange', 'doy', 'timeDiff', 'doy_homogeneity'];
+
+
 
 
 // ---- Area de interesse ----
@@ -12,25 +57,17 @@ var currentyear = 2020;
 //divido em duas partes (Norte e Sul)
 var portugal = ee.FeatureCollection('projects/ee-llopes/assets/Portugal_limits_1000_2partes'); 
 
-// Definir a REGIÃO a ser processada
-var regionName = 'Norte'; 
-//var regionName = 'Sul'; 
-
 // Filtrar a coleção para obter apenas a região escolhida
 var geom = portugal.filter(ee.Filter.eq('Regiao', regionName));
 
 Map.addLayer(portugal, {color: 'yellow'}, 'ROI');
 Map.centerObject(geom, 12);
+//Map.addLayer(geometry ,  {color: 'yellow'}, 'POI');
 
-
-// ---- BANDAS a exportar ----
-// Todas as bandas geradas menos Red, NIR, SWIR2 relativas ao pré-fogo
-var bandstoexport = ['Red', 'NIR', 'SWIR2', 'NBRrep', 'NBRrep_b', 'NBRChange', 'doy', 'year', 'doyb', 'yearb', 'doy_homogeneity'];
 
 
 
 // --------------- PROCESSAMENTO ---------------
-
 
 // Data de inicio e fim para a recolha de imagens / analise
 var start = ee.Date.fromYMD(currentyear, 1, 1).advance(-30, 'day'); // adicionado mes anterior à coleção
@@ -38,53 +75,121 @@ var end = ee.Date.fromYMD(currentyear, 12, 31);
 
 
 // Compilacao de imagens / criacao de colecao para cada landsat
-var filteredCollection_all_8 = ee.ImageCollection('LANDSAT/LC08/C02/T1_L2')
-  .filter(ee.Filter.bounds(geom))
-  .filterMetadata('CLOUD_COVER', 'less_than', 40)
-  .filterDate(start, end).sort('system:time_start');
 
-    
-var filteredCollection_all_7 = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2')
+var filteredCollection_sat1 = sat1
   .filter(ee.Filter.bounds(geom))
   .filterMetadata('CLOUD_COVER', 'less_than', 40)  
   .filterDate(start, end).sort('system:time_start');
   
-//print('Filtered collection L8  - all year: ', filteredCollection_all_8);
-//print('Filtered collection L7  - all year: ', filteredCollection_all_7);
+  
+var filteredCollection_sat2 = sat2
+  .filter(ee.Filter.bounds(geom))
+  .filterMetadata('CLOUD_COVER', 'less_than', 40)
+  .filterDate(start, end).sort('system:time_start');  
+  
 
+
+// Obter e guardar número de imagens por coleção
+print('Número de imagens ' + sat1Name, filteredCollection_sat1.size());
+print('Número de imagens ' + sat2Name, filteredCollection_sat2.size());
+
+
+
+var Imagensporsatelite = ee.FeatureCollection([
+  ee.Feature(null, {
+    sensor: sat1Name,
+    count: filteredCollection_sat1.size(),
+    year: currentyear
+  }),
+  ee.Feature(null, {
+    sensor: sat2Name,
+    count: filteredCollection_sat1.size(),
+    year: currentyear
+  })
+]);
+
+Export.table.toDrive({
+  collection: Imagensporsatelite,
+  folder: 'GEE_EXPORT_ATLAS', 
+  description: 'NumImgSatelite_' + currentyear + regionName,
+  fileFormat: 'CSV'
+});
 
   
-/////////////////////// RENAME L7 AND L8 BANDS, ADD DOY BAND AND MERGE THEM IN A UNIQUE COLLECTION///////////////////////
-  //input: l7_filtered_kernel AND filteredCollection_all_8
+
+/////////////////////// RENAME Sat1 AND Sat2 BANDS, ADD DOY BAND AND MERGE THEM IN A UNIQUE COLLECTION///////////////////////
+  //input: filteredCollection_sat1 AND filteredCollection_sat2
   //output: col_mosaic 
   
   
-    // --- RENAME L7 AND L8 BANDS 
+    // --- RENAME BANDS 
+ 
+    
+// Alterar nomes em "Imagensporsatelite" que dá origem à tabela 
+// Confirmar se necessárias alteracoes nas coleção, nos nomes/bandas em "Rename bands"
+// As duas “combinações” possiveis de bandas:
+var combo1 = ['SR_B3','SR_B4','SR_B7','ST_B6','QA_PIXEL','QA_RADSAT'];
+//Apenas L8 e L9 têm bandas diferentes para o nosso objetivo   
+var combo2 = ['SR_B4','SR_B5','SR_B7','ST_B10','QA_PIXEL','QA_RADSAT'];
+
+// Nomes finais (sempre os mesmos):
+var nomesbandas =    ['Red','NIR','SWIR2','Thermal','QA_PIXEL','QA_RADSAT'];    
+    
+   
+   
+//Sat1
+ // Usa um if/else para apontar bandselect à combo certa
+    var bandselect_sat1;
+    if (sat1 === Landsat8 ||
+        sat1 === Landsat9) {
+      bandselect_sat1 = combo2;
+    } else {
+      bandselect_sat1 = combo1;
+    } 
   
-  //L7
-  var rename_l7 = function(img) {
-      var select = img.select('SR_B3','SR_B4','SR_B7','ST_B6','QA_PIXEL','QA_RADSAT') 
-                      .rename(['Red','NIR','SWIR2','Thermal','QA_PIXEL','QA_RADSAT'])
+  
+  // Alteracao dos nomes
+  var rename_sat1 = function(img) {
+      var select = img.select(bandselect_sat1) 
+                      .rename(nomesbandas)
                     .set('system:time_start', img.get('system:time_start'));
       return select;
   };
   
-  var l7_renamed = filteredCollection_all_7.map(rename_l7);
-  //print('L7 renamed:', l7_renamed);
-  //Map.addLayer(l7_renamed, {}, 'l7_renamed');
+  var Sat1_renamed = filteredCollection_sat1.map(rename_sat1);
   
-  //L8
-  var rename_l8 = function(img) {
-      var select = img.select('SR_B4','SR_B5','SR_B7','ST_B10','QA_PIXEL','QA_RADSAT')
-                      .rename(['Red','NIR','SWIR2','Thermal','QA_PIXEL','QA_RADSAT'])
+  //print('Sat1_renamed:', Sat1_renamed);
+  //Map.addLayer(Sat1_renamed, {}, 'Sat1_renamed');
+  
+  
+  
+  //Sat2
+ // Usa um if/else para apontar bandselect à combo certa
+    var bandselect_sat2;
+    if (sat2 === Landsat8 ||
+        sat2 === Landsat9) {
+      bandselect_sat2 = combo2;
+    } else {
+      bandselect_sat2 = combo1;
+    } 
+  
+  
+  // Alteracao dos nomes
+  var rename_sat2 = function(img) {
+      var select = img.select(bandselect_sat2) 
+                      .rename(nomesbandas)
                     .set('system:time_start', img.get('system:time_start'));
       return select;
   };
   
-  var l8_renamed = filteredCollection_all_8.map(rename_l8);
-  //print('L8 renamed:', l8_renamed);
-  //Map.addLayer(l8_renamed, {}, 'l8_renamed');
+  var Sat2_renamed = filteredCollection_sat2.map(rename_sat2);
   
+  print('Sat2_renamed:', Sat2_renamed);
+  
+  Map.addLayer(Sat2_renamed, {}, 'Sat1_renamed');
+  
+  
+ 
   // ---  CREATE DATE BAND (DOY) FOR EACH IMAGE IN COLLECTION
   
   var addDate = function(image){
@@ -103,35 +208,35 @@ var filteredCollection_all_7 = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2')
   };
   
   //apply it
-  var withDate_l7 = l7_renamed.map(addDate).sort('system:time_start');
-  //print('L7 Collection with doy band: ', withDate_l7);
+  var Sat1_withdate = Sat1_renamed.map(addDate).sort('system:time_start');
+  print(sat1Name + ' Collection with doy band', Sat1_withdate);
   
-  var withDate_l8 = l8_renamed.map(addDate).sort('system:time_start');
-  //print('L8 Collection with doy band: ', withDate_l8);
+  var Sat2_withdate = Sat2_renamed.map(addDate).sort('system:time_start');
+  print(sat2Name + ' Collection with doy band', Sat2_withdate);
  
-  //Map.addLayer(withDate_l7, {}, 'l7_withDate');
-  //Map.addLayer(withDate_l8, {}, 'l8_withDate');
+  Map.addLayer(Sat1_withdate, {}, sat1Name + ' Collection with doy band');
+  Map.addLayer(Sat2_withdate, {}, sat2Name + ' Collection with doy band');
  
-  
-// ---  MERGE L7 AND L8
-//input: withDate_l7 e withDate_l8
+
+// ---  MERGE Satelite 1 e Satelite 2
+//input: Sat1_withdate e Sat2_withdate
 //output: col_mosaic
 
 
-// Antes do merge, adicionar uma banda de prioridade para, nas situações em que existem imagens L7 e L8 para o mesmo dia
-// ser dada prioridade as imagens L8
+// Antes do merge, adicionar uma banda de prioridade para, nas situações em que existem imagens para o mesmo dia
+// ser dada prioridade as imagens do satelite mais recente
 // Anteriormente essa escolha era feita com base na imagem mais recente, independentemente da fonte
 
 
 // Adicionar a banda priority
-// valor 1 para Landsat 7 e valor 2 para Landsat 8
+// valor 1 para Landsat Sat1 e valor 2 para Landsat Sat
 
-var l7_renamed_priority = withDate_l7.map(function(img) {
+var Sat1_renamed_priority = Sat1_withdate.map(function(img) {
   return img.addBands(ee.Image.constant(1).rename('priority'))
             .set('system:time_start', img.get('system:time_start'));
 });
 
-var l8_renamed_priority = withDate_l8.map(function(img) {
+var Sat2_renamed_priority = Sat2_withdate.map(function(img) {
   return img.addBands(ee.Image.constant(2).rename('priority'))
             .set('system:time_start', img.get('system:time_start'));
 });
@@ -162,7 +267,7 @@ function mosaicByDate(imcol){
 
 
 // Uniao das coleções
-var filteredCollection_all = l8_renamed_priority.merge(l7_renamed_priority).sort('system:time_start');
+var filteredCollection_all = Sat2_renamed_priority.merge(Sat1_renamed_priority).sort('system:time_start');
 
 // Cria os mosaicos 
 var col_mosaic = mosaicByDate(filteredCollection_all).sort('system:time_start');
@@ -172,7 +277,7 @@ var col_mosaic = col_mosaic.map(function(img) {
     return img.select(img.bandNames().remove('priority'));
 });
                    
-Map.addLayer(col_mosaic, {}, 'col_mosaic');
+//Map.addLayer(col_mosaic, {}, 'col_mosaic');
 print('Mosaics of the same date', col_mosaic);
 
 
@@ -223,7 +328,7 @@ print('Mosaics of the same date', col_mosaic);
   //Apply it
   var ltCollection_all_NBR =  maskedcollection_all.map(nbr); 
   
-print('Filtered collection with NBR', ltCollection_all_NBR);
+//print('Filtered collection with NBR', ltCollection_all_NBR);
 
 
 /////////////////////// FILTRO DE HAMPEL ///////////////////////
@@ -410,6 +515,7 @@ var iterateFunction = function(i, state) {
   });
 };
 
+
 //////////  EXECUTA A ITERAÇÃO 
 
 // Cria uma lista de índices [0..n-1]
@@ -432,8 +538,8 @@ var resultsList = ee.List(finalDict.get('results'));
 var ltCollection_upd_RNBR = ee.ImageCollection(resultsList);
 
 
-Map.addLayer(ltCollection_upd_RNBR, {bands: ['SWIR2b','NIRb','Redb']}, 'Valores_b (carry-forward)');
-print('withBeforeColl', ltCollection_upd_RNBR);
+//Map.addLayer(ltCollection_upd_RNBR, {bands: ['SWIR2b','NIRb','Redb']}, 'Valores_b (carry-forward)');
+//print('withBeforeColl', ltCollection_upd_RNBR);
 
 
 
@@ -446,6 +552,21 @@ print('withBeforeColl', ltCollection_upd_RNBR);
 // input: ltCollection_upd_RNBR
 // output: ltCollection_upd_NBRchange
 
+
+// Manually define leap years from 1984 to 2024
+var leapYears = ee.List([
+  1988, 1992, 1996, 2000, 2004, 2008,
+  2012, 2016, 2020, 2024
+]);
+//print('Leap years:', leapYears);
+
+
+// Determine if current year is a leap year
+var isLeap = leapYears.contains(currentyear);
+var daysInYear = ee.Number(ee.Algorithms.If(isLeap, 366, 365));
+print(daysInYear)
+
+
 var addNBRChange = function(image) {
   // Aplica a máscara apenas à imagem atual
   var yearMask = image.select('year').eq(currentyear);
@@ -453,13 +574,22 @@ var addNBRChange = function(image) {
   // dNBR = (NBR_Prefire - NBR_Postfire)
   var dNBR = image.select('NBRrep_b').subtract(image.select('NBRrep'));
 
+ // Diferença base (caso o ano seja o mesmo)
+    var timeDiff = image.select('doy').subtract(image.select('doyb'));
+    
+    // Corrige para casos em que os anos são diferentes
+    timeDiff = timeDiff.where(
+      image.select('year').neq(image.select('yearb')),
+      image.select('doy').subtract(image.select('doyb').subtract(daysInYear))
+    ).rename('timeDiff');
+    
   // Calcula NBRChange apenas onde year == currentyear
   var NBRChange = dNBR
     .divide(image.select('NBRrep').add(1.001))
     .updateMask(yearMask)
     .rename('NBRChange');
 
-  return image.addBands(NBRChange);
+  return image.addBands([timeDiff, NBRChange]);
 };
 
 // Map the function over the collection to get the final result
@@ -468,10 +598,11 @@ var ltCollection_upd_NBRchange = ltCollection_upd_RNBR.map(addNBRChange);
 Map.addLayer(ltCollection_upd_NBRchange, {bands: ['SWIR2','NIR','Red']}, 'ltCollection_upd_NBRchange');
 
 
+
 ////////// Multiply All Pixels by 10,000 and Convert to Integer (temporal bands not multiplied)
 
 // List of bands to exclude from scaling
-var bandsToKeep = ['doy', 'year','doyb', 'yearb'];
+var bandsToKeep = ['doy', 'year','doyb', 'yearb', 'timeDiff'];
 
 // Function to scale only selected bands and keep others as integer
 var scaleAndConvert = function(img) {
@@ -503,10 +634,12 @@ print('NBRChange_scaled', NBRChange_scaled);
 // "The qualityMosaic() function selects the image (per-pixel) with the HIGHEST quality-band-score to contribute to the resulting mosaic". That is, the values are taken from the image where NBRChange is maximum.
 
 var MAX_NBRCHANGE = NBRChange_scaled.qualityMosaic('NBRChange');
+Map.addLayer(MAX_NBRCHANGE, {bands: ['SWIR2','NIR','Red'], min: -10000, max: 10000}, 'MAX_NBRCHANGE ');
+
 
 // Print and check the result
-print('MAX_NBRCHANGE composite:', MAX_NBRCHANGE);
-Map.addLayer(MAX_NBRCHANGE, {bands: ['SWIR2','NIR','Red']}, 'MAX_NBRCHANGE ');
+//print('MAX_NBRCHANGE composite:', MAX_NBRCHANGE);
+//Map.addLayer(MAX_NBRCHANGE, {bands: ['SWIR2','NIR','Red'], min: -10000, max: 10000}, 'MAX_NBRCHANGE ');
 
 
 ///////////////////// HOMOGENEITY //////////////////////////
@@ -535,7 +668,7 @@ var AnualComposite = AnualComposite.select(bandstoexport);
 
 
 print('Annual Composite ' + currentyear ,AnualComposite);
-Map.addLayer(AnualComposite, {bands: ['SWIR2','NIR','Red']}, 'AnualComposite ' + currentyear );
+Map.addLayer(AnualComposite, {bands: ['SWIR2','NIR','Red'], min: 0, max: 10000}, 'AnualComposite ' + currentyear );
 
 
 
@@ -544,7 +677,7 @@ Map.addLayer(AnualComposite, {bands: ['SWIR2','NIR','Red']}, 'AnualComposite ' +
 //Export MULTIBAND RASTER
  Export.image.toDrive({
    image:AnualComposite,
-   description: 'CompositoAnual'+currentyear+regionName,
+   description: 'CompositoAnual_'+currentyear+regionName,
    folder: 'GEE_EXPORT_ATLAS',
    scale: 30,
    region: geom,
@@ -552,6 +685,5 @@ Map.addLayer(AnualComposite, {bands: ['SWIR2','NIR','Red']}, 'AnualComposite ' +
    fileFormat: 'GeoTIFF',
    crs: 'EPSG:4326' // -> crs WGS84 
  });
- 
  
  
